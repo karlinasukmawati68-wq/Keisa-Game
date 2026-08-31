@@ -1,0 +1,501 @@
+<?php
+session_start();
+?>
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shark Frenzy</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Courier New', Courier, monospace; }
+        body { background: #010610; display: flex; justify-content: center; align-items: center; min-height: 100vh; color: #fff; overflow: hidden; }
+        
+        #game-container { 
+            position: relative; width: 800px; height: 500px; 
+            border: 4px solid #00e5ff; border-radius: 12px; overflow: hidden; 
+            box-shadow: 0 0 50px rgba(0, 229, 255, 0.4); background: #00122a;
+        }
+        canvas { display: block; width: 100%; height: 100%; image-rendering: auto; }
+        
+        .overlay { 
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
+            display: flex; flex-direction: column; justify-content: center; align-items: center; 
+            background: rgba(1, 10, 26, 0.88); backdrop-filter: blur(5px); z-index: 10; 
+        }
+        .hidden { display: none !important; }
+        
+        h1 { font-size: 40px; text-shadow: 4px 4px 0px #005c97, 0 0 20px #00e5ff; margin-bottom: 20px; }
+        h2 { font-size: 24px; color: #ffd54f; margin-bottom: 15px; }
+        
+        .btn { 
+            padding: 12px 30px; font-size: 16px; font-weight: bold; color: #010a1a; 
+            background: #ffb300; border: 3px solid #fff; cursor: pointer; 
+            box-shadow: 4px 4px 0px #000; margin: 6px; width: 220px; transition: 0.1s; text-align: center;
+        }
+        .btn:hover { background: #ffd54f; transform: translate(-2px, -2px); box-shadow: 6px 6px 0px #000; }
+        
+        .player-selector { display: flex; gap: 20px; margin-bottom: 20px; }
+        .player-card { 
+            border: 3px solid #546e7a; background: rgba(255,255,255,0.05); padding: 10px; 
+            border-radius: 8px; text-align: center; cursor: pointer; width: 150px;
+            display: flex; flex-direction: column; align-items: center;
+        }
+        .player-card.active { border-color: #00e5ff; background: rgba(0, 229, 255, 0.15); box-shadow: 0 0 15px #00e5ff; }
+        .player-card img { width: 90px; height: 50px; object-fit: contain; margin-bottom: 8px; }
+
+        .hud { 
+            position: absolute; top: 15px; left: 20px; right: 20px; 
+            display: flex; justify-content: space-between; align-items: center; 
+            pointer-events: none; z-index: 5; text-shadow: 2px 2px 0px #000;
+        }
+        .energy-bar-bg { width: 180px; height: 18px; background: #000; border: 2px solid #fff; overflow: hidden; }
+        .energy-bar-fill { width: 100%; height: 100%; background: linear-gradient(90deg, #ff1744, #00e676); transition: width 0.1s linear; }
+        .score-box { font-size: 20px; font-weight: bold; color: #ffd54f; }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="gameCanvas" width="800" height="500"></canvas>
+
+    <div id="hud" class="hud hidden">
+        <div class="score-box">SCORE: <span id="scoreText">0</span></div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size:12px; font-weight:bold;">ENERGY</span>
+            <div class="energy-bar-bg"><div id="energyFill" class="energy-bar-fill"></div></div>
+        </div>
+    </div>
+
+    <div id="mainMenu" class="overlay">
+        <h1>SHARK FRENZY</h1>
+        <button class="btn" onclick="startGame()">PLAY</button>
+        <button class="btn" onclick="showScreen('playerMenu')">PILIH PLAYER</button>
+    </div>
+
+    <div id="playerMenu" class="overlay hidden">
+        <h2>PILIH KARAKTER</h2>
+        <div class="player-selector">
+            <div class="player-card active" id="card-default" onclick="selectShark('default', 5)">
+                <img src="hiu.png" alt="Hiu Default">
+                <p style="font-weight:bold; color:#00e5ff;">DEFAULT</p>
+                <p style="font-size:11px; margin-top:3px; color:#b0bec5;">Hiu Biru Original</p>
+            </div>
+            <div class="player-card" id="card-red" onclick="selectShark('red', 6)">
+                <img src="hiu_merah.png" alt="Hiu Merah">
+                <p style="font-weight:bold; color:#ff1744;">RED SHARK</p>
+                <p style="font-size:11px; margin-top:3px; color:#b0bec5;">Speed: Cepat (+20%)</p>
+            </div>
+            <div class="player-card" id="card-gold" onclick="selectShark('gold', 4)">
+                <img src="hiu_gold.png" alt="Hiu Gold">
+                <p style="font-weight:bold; color:#ffd54f;">GOLD SHARK</p>
+                <p style="font-size:11px; margin-top:3px; color:#b0bec5;">Speed: Lambat (-20%)</p>
+            </div>
+        </div>
+        <button class="btn" onclick="showScreen('mainMenu')">KEMBALI</button>
+    </div>
+
+    <div id="gameOverMenu" class="overlay hidden">
+        <h1 style="color:#ff1744;">GAME OVER</h1>
+        <p style="font-size: 20px; margin-bottom: 20px;">SKOR ANDA: <span id="finalScore">0</span></p>
+        <button class="btn" onclick="startGame()">MAIN LAGI</button>
+        <button class="btn" style="background:#00bcd4;" onclick="showScreen('mainMenu')">MENU UTAMA</button>
+    </div>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+let audioCtx = null;
+
+function initAudio() {
+    try {
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+    } catch (e) {
+        console.log("Audio Web API tidak didukung.");
+    }
+}
+
+function playEatSound() {
+    if (!audioCtx) return;
+    try {
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+        }
+        const now = audioCtx.currentTime;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(320, now);
+        osc.frequency.exponentialRampToValueAtTime(60, now + 0.12);
+
+        gain.gain.setValueAtTime(0.8, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        osc.start(now);
+        osc.stop(now + 0.12);
+    } catch (e) {}
+}
+
+const bgImage = new Image();
+let bgLoaded = false;
+bgImage.onload = () => { bgLoaded = true; draw(); };
+bgImage.src = 'background (2).jpeg';
+
+const sharkImages = {};
+const sharkSources = {
+    'default': 'hiu.png',
+    'red': 'hiu_merah.png',
+    'gold': 'hiu_gold.png'
+};
+
+for (let key in sharkSources) {
+    sharkImages[key] = new Image();
+    sharkImages[key].src = sharkSources[key];
+    sharkImages[key].onload = () => { draw(); };
+}
+
+let gameState = 'MENU';
+let score = 0; let energy = 100;
+let keys = {};
+let currentSharkConfig = { key: 'default', speed: 5 };
+
+let bubbles = Array.from({length: 20}, () => ({
+    x: Math.random() * canvas.width, y: Math.random() * canvas.height,
+    r: Math.random() * 3 + 1, speed: Math.random() * 1 + 0.5
+}));
+
+window.addEventListener('keydown', e => keys[e.key] = true);
+window.addEventListener('keyup', e => keys[e.key] = false);
+
+function showScreen(screenId) {
+    document.querySelectorAll('.overlay').forEach(el => el.classList.add('hidden'));
+    document.getElementById(screenId).classList.remove('hidden');
+    document.getElementById('hud').classList.add('hidden');
+    gameState = 'MENU'; draw();
+}
+
+function selectShark(key, speed) {
+    currentSharkConfig.key = key;
+    currentSharkConfig.speed = speed;
+    document.querySelectorAll('.player-card').forEach(c => c.classList.remove('active'));
+    document.getElementById('card-' + key).classList.add('active');
+}
+
+class ImageShark {
+    constructor() {
+        this.width = 130; 
+        this.height = 70;
+        this.x = 80;
+        this.y = 220;
+        this.speed = currentSharkConfig.speed;
+        this.imageKey = currentSharkConfig.key;
+        this.frame = 0;
+        this.targetAngle = 0;
+        this.eatAnimTime = 0;
+        this.scaleY = 1;
+        this.scaleX = 1;
+    }
+
+    update(fishes) {
+        this.targetAngle = 0;
+        let isMoving = false;
+
+        if (keys['ArrowUp'] || keys['w']) { if (this.y > 20) this.y -= this.speed; this.targetAngle = -10; isMoving = true; }
+        if (keys['ArrowDown'] || keys['s']) { if (this.y < canvas.height - 75) this.y += this.speed; this.targetAngle = 10; isMoving = true; }
+        if (keys['ArrowLeft'] || keys['a']) { if (this.x > 20) this.x -= this.speed; isMoving = true; }
+        if (keys['ArrowRight'] || keys['d']) { if (this.x < canvas.width - 130) this.x += this.speed; isMoving = true; }
+        
+        if (isMoving) this.frame += 0.12; else this.frame += 0.04;
+
+        let mouthX = this.x + this.width;
+        let mouthY = this.y + this.height / 2;
+        let isNearFish = false;
+
+        if (this.eatAnimTime > 0) {
+            this.eatAnimTime--;
+            this.scaleY = 0.92;
+            this.scaleX = 1.05;
+        } else {
+            fishes.forEach(f => {
+                let dist = Math.hypot(f.x - mouthX, f.y - mouthY);
+                if (dist < 100) isNearFish = true;
+            });
+
+            if (isNearFish) {
+                this.scaleY = 1.06 + Math.sin(this.frame * 2) * 0.03;
+                this.scaleX = 0.98;
+            } else {
+                this.scaleY = 1 + Math.sin(this.frame) * 0.02;
+                this.scaleX = 1;
+            }
+        }
+    }
+
+    triggerEat() {
+        this.eatAnimTime = 8;
+        playEatSound();
+    }
+
+    draw() {
+        ctx.save();
+        ctx.translate(this.x + this.width / 2, this.y + this.height / 2);
+        
+        let tailWiggle = Math.sin(this.frame) * 2;
+        ctx.rotate((this.targetAngle + tailWiggle) * Math.PI / 180);
+
+        let activeImg = sharkImages[this.imageKey];
+        if (activeImg && activeImg.complete) {
+            let imgAspect = activeImg.width / activeImg.height;
+            let drawW = this.width * 1.5; 
+            let drawH = drawW / imgAspect;
+
+            ctx.scale(this.scaleX, this.scaleY);
+            ctx.drawImage(activeImg, -drawW / 2, -drawH / 2, drawW, drawH);
+        }
+        ctx.restore();
+    }
+}
+
+class ExactCartoonFish {
+    constructor() {
+        this.reset();
+    }
+
+    reset() {
+        this.x = canvas.width + Math.random() * 200;
+        this.y = Math.random() * (canvas.height - 120) + 40;
+        this.speed = 1.8 + Math.random() * 2;
+        this.size = 0.75 + Math.random() * 0.25;
+        this.swimFrame = Math.random() * 10;
+
+        // Skema Warna Presisi Sesuai Gambar
+        const schemes = [
+            { main: '#F28A22', fin: '#DB6315', stroke: '#501B05', belly: '#F7A743', striped: false }, // Oranye Goldfish
+            { main: '#A042C8', fin: '#7F2A9E', stroke: '#320C40', belly: '#B85FE0', striped: false }, // Ungu
+            { main: '#E23B3B', fin: '#B82323', stroke: '#4D0808', belly: '#EB6363', striped: false }, // Merah
+            { main: '#ECC026', fin: '#C99E12', stroke: '#4A3B02', belly: '#F3D453', striped: false }, // Kuning
+            { main: '#25B2D6', fin: '#1583A0', stroke: '#063542', belly: '#55C8E6', striped: false }, // Cyan / Biru
+            { main: '#F28A22', fin: '#DB6315', stroke: '#501B05', belly: '#F7A743', striped: true }   // Oranye Salur Ungu
+        ];
+        this.color = schemes[Math.floor(Math.random() * schemes.length)];
+    }
+
+    update() {
+        this.x -= this.speed;
+        this.swimFrame += 0.15;
+        if (this.x < -50) this.reset();
+    }
+
+    draw() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.scale(-this.size, this.size); // Mengarah ke kiri
+
+        let tailWiggle = Math.sin(this.swimFrame) * 2.5;
+
+        ctx.lineWidth = 2.5;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+
+        // 1. SIRIP DORSAL (ATAS)
+        ctx.fillStyle = this.color.fin;
+        ctx.strokeStyle = this.color.stroke;
+        ctx.beginPath();
+        ctx.moveTo(-2, -12);
+        ctx.quadraticCurveTo(8, -26, -6, -26);
+        ctx.quadraticCurveTo(-18, -22, -14, -8);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // 2. SIRIP BAWAH & EKOR
+        ctx.beginPath();
+        ctx.moveTo(-4, 10);
+        ctx.quadraticCurveTo(-2, 20, -10, 18);
+        ctx.quadraticCurveTo(-14, 14, -10, 8);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // EKOR BERCABANG
+        ctx.beginPath();
+        ctx.moveTo(-16, 0);
+        ctx.bezierCurveTo(-24 + tailWiggle, -16, -30 + tailWiggle, -18, -32 + tailWiggle, -14);
+        ctx.bezierCurveTo(-25 + tailWiggle, -4, -22 + tailWiggle, 0, -32 + tailWiggle, 14);
+        ctx.bezierCurveTo(-30 + tailWiggle, 18, -24 + tailWiggle, 16, -16, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // Garis-garis Tekstur Ekor
+        ctx.beginPath();
+        ctx.moveTo(-18, 0); ctx.lineTo(-27 + tailWiggle, -10);
+        ctx.moveTo(-18, 0); ctx.lineTo(-27 + tailWiggle, 10);
+        ctx.stroke();
+
+        // 3. BADAN UTAMA (Bentuk Khas Kartun)
+        ctx.fillStyle = this.color.main;
+        ctx.beginPath();
+        ctx.moveTo(22, 2);
+        ctx.bezierCurveTo(20, -18, -8, -18, -18, -2);
+        ctx.bezierCurveTo(-20, 14, 16, 18, 22, 2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // Strip / Garis Corak (Jika tipe bergaris)
+        if (this.color.striped) {
+            ctx.fillStyle = '#7F2A9E';
+            ctx.beginPath();
+            ctx.moveTo(2, -15); ctx.lineTo(-2, -15); ctx.lineTo(-5, -3); ctx.lineTo(0, -3); ctx.closePath(); ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(-6, -14); ctx.lineTo(-10, -14); ctx.lineTo(-11, -3); ctx.lineTo(-8, -3); ctx.closePath(); ctx.fill();
+        }
+
+        // 4. SIRIP DADA (Pectoral Fin)
+        ctx.fillStyle = this.color.fin;
+        ctx.beginPath();
+        ctx.moveTo(4, 4);
+        ctx.quadraticCurveTo(-4, 16, -10, 12);
+        ctx.quadraticCurveTo(-8, 4, 4, 4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // 5. MATA (Persis Seperti Gambar)
+        let eyeX = 12, eyeY = -4, eyeR = 6.5;
+
+        // Putih Mata
+        ctx.fillStyle = '#FFFFFF';
+        ctx.strokeStyle = this.color.stroke;
+        ctx.beginPath();
+        ctx.arc(eyeX, eyeY, eyeR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        // Pupil Hitam
+        ctx.fillStyle = '#1A1A1A';
+        ctx.beginPath();
+        ctx.arc(eyeX + 1.5, eyeY + 0.5, eyeR * 0.55, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Highlight Putih Mata (Bintik Sinar)
+        ctx.fillStyle = '#FFFFFF';
+        ctx.beginPath();
+        ctx.arc(eyeX + 0.2, eyeY - 1.8, eyeR * 0.22, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Kelopak/Alis Atas Mata
+        ctx.beginPath();
+        ctx.arc(eyeX, eyeY, eyeR, Math.PI * 1.1, Math.PI * 1.9);
+        ctx.stroke();
+
+        // 6. MULUT & BIBIR
+        ctx.fillStyle = this.color.fin;
+        ctx.beginPath();
+        ctx.arc(22, 3, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.restore();
+    }
+}
+
+class Mine {
+    constructor() { this.reset(); }
+    reset() { this.x = canvas.width + Math.random() * 400; this.y = Math.random() * (canvas.height - 120) + 40; this.speed = 2; }
+    update() { this.x -= this.speed; if (this.x < -30) this.reset(); }
+    draw() {
+        ctx.fillStyle = '#37474f'; ctx.beginPath(); ctx.arc(this.x, this.y, 12, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#ff1744'; ctx.fillRect(this.x - 2, this.y - 2, 4, 4);
+    }
+}
+
+let player = new ImageShark();
+let fishes = Array.from({length: 7}, () => new ExactCartoonFish());
+let mines = Array.from({length: 2}, () => new Mine());
+
+function checkCollision(r1, r2) {
+    return r1.x < r2.x + r2.w && r1.x + r1.w > r2.x && r1.y < r2.y + r2.h && r1.y + r1.h > r2.y;
+}
+
+function drawBackground() {
+    if (bgLoaded) { ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height); } 
+    else {
+        let grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+        grad.addColorStop(0, '#005c97'); grad.addColorStop(1, '#00122a');
+        ctx.fillStyle = grad; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+    bubbles.forEach(b => {
+        b.y -= b.speed;
+        if (b.y < 0) { b.y = canvas.height; b.x = Math.random() * canvas.width; }
+        ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill();
+    });
+}
+
+function startGame() {
+    initAudio(); 
+    score = 0; energy = 100;
+    player = new ImageShark();
+    gameState = 'PLAYING';
+    document.querySelectorAll('.overlay').forEach(el => el.classList.add('hidden'));
+    document.getElementById('hud').classList.remove('hidden');
+    gameLoop();
+}
+
+function gameOver() {
+    gameState = 'GAMEOVER';
+    document.getElementById('hud').classList.add('hidden');
+    document.getElementById('gameOverMenu').classList.remove('hidden');
+    document.getElementById('finalScore').innerText = score;
+}
+
+function gameLoop() {
+    if (gameState !== 'PLAYING') return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawBackground();
+
+    energy -= 0.08;
+    document.getElementById('energyFill').style.width = Math.max(0, energy) + '%';
+    document.getElementById('scoreText').innerText = score;
+
+    if (energy <= 0) { gameOver(); return; }
+
+    player.update(fishes); player.draw();
+
+    fishes.forEach(f => {
+        f.update(); f.draw();
+        if (checkCollision({x: player.x, y: player.y, w: player.width, h: player.height}, {x: f.x - 15, y: f.y - 12, w: 30, h: 24})) {
+            score += 10; energy = Math.min(100, energy + 10); 
+            player.triggerEat();
+            f.reset();
+        }
+    });
+
+    mines.forEach(m => {
+        m.update(); m.draw();
+        if (checkCollision({x: player.x, y: player.y, w: player.width, h: player.height}, {x: m.x - 12, y: m.y - 12, w: 24, h: 24})) {
+            energy -= 20; m.reset();
+        }
+    });
+
+    requestAnimationFrame(gameLoop);
+}
+
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawBackground();
+}
+draw();
+</script>
+</body>
+  </html>
